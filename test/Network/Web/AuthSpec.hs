@@ -11,7 +11,7 @@ import qualified Data.ByteString.Lazy as LBS
 import Data.Text (Text)
 import Network.HTTP.Client
   ( defaultManagerSettings,
-    createCookieJar, destroyCookieJar,
+    createCookieJar, destroyCookieJar, cookie_name, cookie_value,
     httpLbs,
     method,
     newManager,
@@ -47,7 +47,7 @@ spec = around startStopServer $
       resp <- login (Credentials "user" "pass")  `runClientM` env
 
       cookies <- destroyCookieJar <$> atomically (readTVar cookieJar)
-
+      print cookies
       getResponse <$> resp `shouldBe` Right NoContent
       length cookies `shouldBe` 2
 
@@ -91,6 +91,27 @@ spec = around startStopServer $
               { method = "GET",
                 requestHeaders =
                   [("Authorization", LBS.toStrict $ "Bearer " <> jwt)]
+              }
+
+      response <- httpLbs request mgr
+
+      responseStatus response `shouldBe` ok200
+
+    it "authenticates request from logged in user" $ \AuthServer {authServerConfig = AuthConfig {authServerPort}} -> do
+      cookieJar <- newTVarIO $ createCookieJar []
+      mgr <- newManager defaultManagerSettings
+      env <- ClientEnv <$> pure mgr <*> pure (BaseUrl Http "localhost" authServerPort "") <*> pure (Just cookieJar)
+
+      _ <- login (Credentials "user" "pass")  `runClientM` env
+
+      cookies <- destroyCookieJar <$> atomically (readTVar cookieJar)
+      let [token] = LBS.fromStrict . cookie_value <$> filter ((== "JWT-Cookie") . cookie_name) cookies
+      initialRequest <- parseRequest ("http://localhost:" <> show authServerPort <> "/auth")
+      let request =
+            initialRequest
+              { method = "GET",
+                requestHeaders =
+                  [("Authorization", LBS.toStrict $ "Bearer " <> token)]
               }
 
       response <- httpLbs request mgr
