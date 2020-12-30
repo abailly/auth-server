@@ -3,6 +3,7 @@
 module Network.Web.AuthSpec where
 
 import Control.Concurrent (threadDelay)
+import Control.Concurrent.STM(newTVarIO, readTVar, atomically)
 import Control.Exception (IOException, bracket, catch)
 import Crypto.JOSE
 import Data.Aeson (decode)
@@ -10,6 +11,7 @@ import qualified Data.ByteString.Lazy as LBS
 import Data.Text (Text)
 import Network.HTTP.Client
   ( defaultManagerSettings,
+    createCookieJar, destroyCookieJar,
     httpLbs,
     method,
     newManager,
@@ -38,9 +40,20 @@ spec = around startStopServer $
 
       res `shouldBe` Right NoContent
 
+    it "can login registered user and returns Cookie" $ \AuthServer {authServerConfig = AuthConfig {authServerPort}} -> do
+      cookieJar <- newTVarIO $ createCookieJar []
+      env <- ClientEnv <$> newManager defaultManagerSettings <*> pure (BaseUrl Http "localhost" authServerPort "") <*> pure (Just cookieJar)
+
+      resp <- login (Credentials "user" "pass")  `runClientM` env
+
+      cookies <- destroyCookieJar <$> atomically (readTVar cookieJar)
+
+      getResponse <$> resp `shouldBe` Right NoContent
+      length cookies `shouldBe` 2
+
     it "authenticates original OPTIONS query even with an invalid user/password" $ \AuthServer {authServerConfig = AuthConfig {authServerPort}} -> do
       mgr <- newManager defaultManagerSettings
-      initialRequest <- parseRequest ("http://localhost:" <> show authServerPort)
+      initialRequest <- parseRequest ("http://localhost:" <> show authServerPort <> "/auth")
       let request =
             initialRequest
               { method = "GET",
@@ -61,7 +74,7 @@ spec = around startStopServer $
 
     it "returns www-authenticate header when auth fails" $ \AuthServer {authServerConfig = AuthConfig {authServerPort}} -> do
       mgr <- newManager defaultManagerSettings
-      initialRequest <- parseRequest ("http://localhost:" <> show authServerPort)
+      initialRequest <- parseRequest ("http://localhost:" <> show authServerPort <> "/auth")
       let request = initialRequest {method = "GET"}
 
       response <- httpLbs request mgr
@@ -72,7 +85,7 @@ spec = around startStopServer $
     it "authenticates user with a valid Authentication header" $ \AuthServer {authServerConfig = AuthConfig {authServerPort}} -> do
       Right jwt <- makeJWT claims (defaultJWTSettings sampleKey) Nothing
       mgr <- newManager defaultManagerSettings
-      initialRequest <- parseRequest ("http://localhost:" <> show authServerPort)
+      initialRequest <- parseRequest ("http://localhost:" <> show authServerPort <> "/auth")
       let request =
             initialRequest
               { method = "GET",

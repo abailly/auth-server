@@ -16,12 +16,16 @@ module Network.Web.Auth
   ( AuthServer (..),
     AuthConfig (..),
     AuthenticatedUser (..),
+    Credentials (..),
     defaultConfig,
     defaultPort,
-    validate,
     startServer,
     waitServer,
     stopServer,
+
+    -- * Client
+    validate,
+    login,
 
     -- * Passwords File Operations
     makeDB,
@@ -37,6 +41,7 @@ import Control.Concurrent.Async
   )
 import Control.Exception (IOException, catch)
 import Control.Monad (forever, when)
+import Control.Monad.Trans
 import Crypto.Hash
 import Crypto.JOSE
 import Crypto.KDF.BCrypt
@@ -157,9 +162,9 @@ authCheck ::
   AuthDB ->
   BasicAuthData ->
   IO (AuthResult AuthenticatedUser)
-authCheck authDB (BasicAuthData login password) =
+authCheck authDB (BasicAuthData ident password) =
   readIORef authDB
-    >>= pure . maybe SAS.Indefinite Authenticated . M.lookup (login, encryptedPassword)
+    >>= pure . maybe SAS.Indefinite Authenticated . M.lookup (ident, encryptedPassword)
   where
     encryptedPassword = encrypt password
 
@@ -199,7 +204,42 @@ type instance BasicAuthCfg = BasicAuthData -> IO (AuthResult AuthenticatedUser)
 instance FromBasicAuthData AuthenticatedUser where
   fromBasicAuthData authData authCheckFunction = authCheckFunction authData
 
-type AuthAPI = CaptureAll "path" Text :> Get '[JSON] (Headers '[Header "WWW-Authenticate" String] NoContent)
+data Credentials = Credentials
+  { credLogin :: Text,
+    credPassword :: Text
+  }
+  deriving (Eq, Show, Generic)
+
+instance ToJSON Credentials
+
+instance FromJSON Credentials
+
+type LoginAPI =
+  Summary
+    "Allows users to login passing in credentials. If successful, this will set cookies \
+    \ containing user's data in the form of JWT token."
+    :> "login"
+    :> ReqBody '[JSON] Credentials
+    :> Post
+         '[JSON]
+         ( Headers
+             '[ Header "Set-Cookie" SetCookie,
+                Header "Set-Cookie" SetCookie
+              ]
+             NoContent
+         )
+
+type AuthAPI =
+  Summary
+    "A endpoint to validate authenticated access. This is expected to be used by a reverse proxy which can query that endpoint, \
+    \ passing an arbitrary target path. This server will verify the passed credentials and potentially return a www-authenticate \
+    \ header to request authentication."
+    :> "auth"
+    :> CaptureAll "path" Text
+    :> Get '[JSON] (Headers '[Header "www-authenticate" String] NoContent)
+
+-- endpoints are protected with JWT and Cookie authentication scheme
+type Protected = Auth '[SA.JWT, SA.Cookie, SA.BasicAuth] AuthenticatedUser
 
 -- | Authentication endpoint
 -- this provides 2 authentication schemes for users:
@@ -210,28 +250,55 @@ type AuthAPI = CaptureAll "path" Text :> Get '[JSON] (Headers '[Header "WWW-Auth
 --  * `BasicAuth`: Expects an @Authorization: Basic XXXX@ header in the query where @XXX@
 --    is a hashed login:password pair. This is useful only in testing and staging context.
 type AuthAPIServer =
-  Auth '[SA.JWT, SA.BasicAuth] AuthenticatedUser :> Header "x-original-method" Text :> AuthAPI
+  LoginAPI
+    :<|> Protected :> Header "x-original-method" Text :> AuthAPI
 
 -- ** Basic Client, for testing purpose
 
-type AuthAPIClient = S.BasicAuth "test" AuthenticatedUser :> AuthAPI
+type AuthAPIClient =
+  LoginAPI :<|> S.BasicAuth "test" AuthenticatedUser :> AuthAPI
 
-validate :: BasicAuthData -> [Text] -> ClientM (Headers '[Header "WWW-Authenticate" String] NoContent)
-validate = client (Proxy :: Proxy AuthAPIClient)
+validate :: BasicAuthData -> [Text] -> ClientM (Headers '[Header "www-authenticate" String] NoContent)
+login ::
+  Credentials ->
+  ClientM
+    ( Headers
+        '[ Header "Set-Cookie" SetCookie,
+           Header "Set-Cookie" SetCookie
+         ]
+        NoContent
+    )
+login :<|> validate = client (Proxy :: Proxy AuthAPIClient)
 
 -- * Server
 
 -- ** Server Handler
 
+loginS ::
+  AuthDB ->
+  CookieSettings ->
+  JWTSettings ->
+  Credentials ->
+  Handler (Headers '[Header "Set-Cookie" SetCookie, Header "Set-Cookie" SetCookie] NoContent)
+loginS authDB cs js (Credentials l p) = do
+  res <- liftIO $ authCheck authDB (BasicAuthData (encodeUtf8 l) (encodeUtf8 p))
+  case res of
+    Authenticated usr -> do
+      mApplyCookies <- liftIO $ acceptLogin cs js usr
+      case mApplyCookies of
+        Nothing -> throwError err401
+        Just applyCookies -> return $ applyCookies NoContent
+    _ -> throwError err401
+
 -- | A simple handler that only checks the result of authentication is `Authenticated`
 -- TODO: validate claims
-server :: Server AuthAPIServer
+server :: AuthResult val -> Maybe Text -> path -> Handler (Headers '[Header "www-authenticate" String] NoContent)
 server _ (Just "OPTIONS") _ = pure $ noHeader NoContent
 server (Authenticated _) _ _ = handleValidate
   where
-    handleValidate :: Handler (Headers '[Header "WWW-Authenticate" String] NoContent)
+    handleValidate :: Handler (Headers '[Header "www-authenticate" String] NoContent)
     handleValidate = pure $ noHeader NoContent
-server _ _ _ = throwAll err401 {errHeaders = [("WWW-Authenticate", "Basic realm=\"test\"")]}
+server _ _ _ = throwAll err401 {errHeaders = [("www-authenticate", "Basic realm=\"test\"")]}
 
 -- | Starts server with given configuration
 startServer :: AuthConfig -> IO AuthServer
@@ -285,8 +352,9 @@ mkApp :: JWK -> AuthDB -> IO Application
 mkApp key authDB = do
   let jwtCfg = defaultJWTSettings key
       authCfg = authCheck authDB
-      cfg = jwtCfg :. defaultCookieSettings :. authCfg :. EmptyContext
+      cookieCfg = defaultCookieSettings
+      cfg = jwtCfg :. cookieCfg :. authCfg :. EmptyContext
       api = Proxy :: Proxy AuthAPIServer
       doLog = mkRequestLogger $ def {outputFormat = CustomOutputFormatWithDetails formatAsJSON}
   logger <- doLog
-  pure $ logger $ serveWithContext api cfg server
+  pure $ logger $ serveWithContext api cfg (loginS authDB cookieCfg jwtCfg :<|> server)
