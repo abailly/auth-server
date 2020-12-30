@@ -47,7 +47,7 @@ spec = around startStopServer $
       resp <- login (Credentials "user" "pass")  `runClientM` env
 
       cookies <- destroyCookieJar <$> atomically (readTVar cookieJar)
-      print cookies
+
       getResponse <$> resp `shouldBe` Right NoContent
       length cookies `shouldBe` 2
 

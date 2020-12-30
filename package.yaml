@@ -40,6 +40,7 @@ library:
     - async
     - base
     - bytestring
+    - base64-bytestring
     - containers
     - cryptonite
     - data-default
