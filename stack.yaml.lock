@@ -3,7 +3,18 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/lock_files
 
-packages: []
+packages:
+- completed:
+    name: servant-server-base
+    version: 0.1.0.0
+    git: https://github.com/pankzsoft/servant-server-base.git
+    pantry-tree:
+      size: 1772
+      sha256: e299e8609ad2e1a58b19b1c3c7c56d6f0cdb7ec62504c2672bc16aa006112154
+    commit: d0f6b637bb102b0f8e637e2d826b2f2586a611f2
+  original:
+    git: https://github.com/pankzsoft/servant-server-base.git
+    commit: d0f6b637bb102b0f8e637e2d826b2f2586a611f2
 snapshots:
 - completed:
     size: 533252

@@ -57,6 +57,7 @@ library:
     - servant-auth-server
     - servant-server
     - servant-client
+    - servant-server-base
     - servant-swagger
     - swagger2
     - text

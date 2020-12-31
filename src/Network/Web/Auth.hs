@@ -19,6 +19,7 @@ module Network.Web.Auth
     Credentials (..),
     defaultConfig,
     defaultPort,
+    getServerPort,
     startServer,
     waitServer,
     stopServer,
@@ -34,10 +35,7 @@ where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async
-  ( Async (..),
-    async,
-    cancel,
-    waitAnyCancel,
+  (     async,
   )
 import Control.Exception (IOException, catch, throwIO)
 import Control.Monad (forever, when, foldM)
@@ -50,9 +48,6 @@ import Data.Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base64 as B64
-import qualified Data.ByteString.Lazy as LBS
-import Data.Default
-import Data.Functor (void)
 import Data.IORef
 import qualified Data.Map as M
 import Data.Proxy
@@ -65,13 +60,13 @@ import Data.Text.Encoding
 import qualified Data.Text.IO as Text
 import GHC.Generics
 import Network.Wai.Handler.Warp
-import Network.Wai.Middleware.RequestLogger
-import Network.Wai.Middleware.RequestLogger.JSON
+import Network.CORS
+import Preface.Log
+import qualified Preface.Server as Server
 import Servant as S
 import Servant.Auth as SA
 import Servant.Auth.Server as SAS
 import Servant.Client
-import System.IO
 
 -- * Types
 
@@ -79,14 +74,19 @@ import System.IO
 -- This object is used to control the server, mainly waiting for it
 -- and stopping it
 data AuthServer = AuthServer
-  { threads :: [Async ()],
+  { authServerBase :: Server.AppServer,
     authServerConfig :: AuthConfig
   }
+
+getServerPort :: AuthServer -> Int
+getServerPort (AuthServer app _) = Server.serverPort app
 
 -- | Server configuration
 data AuthConfig = AuthConfig
   { -- | the actual port server is listening on
     authServerPort :: Port,
+    -- | The server fully qualified domain name
+    authServerName :: Text,
     -- | Optional file to use for authenticating users with Basic auth
     --  scheme. File should contain one login:password per line, with
     --  password being encrypted using publicAuthKey
@@ -103,7 +103,7 @@ instance ToJSON AuthConfig
 instance FromJSON AuthConfig
 
 defaultConfig :: JWK -> AuthConfig
-defaultConfig = AuthConfig defaultPort Nothing 5000000
+defaultConfig = AuthConfig defaultPort "localhost:3001" Nothing 5000000
 
 defaultPort :: Int
 defaultPort = 3001
@@ -320,23 +320,11 @@ server _ _ _ = throwAll err401 {errHeaders = [("www-authenticate", "Basic realm=
 
 -- | Starts server with given configuration
 startServer :: AuthConfig -> IO AuthServer
-startServer conf@AuthConfig {authServerPort, publicAuthKey, passwordsFile, reloadInterval} = do
+startServer conf@AuthConfig {authServerPort, authServerName, publicAuthKey, passwordsFile, reloadInterval} = do
   authDB <- readDB passwordsFile
-  let settings =
-        setPort authServerPort $
-          setBeforeMainLoop (LBS.hPutStr stderr (encode startupMessage <> "\n")) $
-            defaultSettings
-      runner =
-        if authServerPort /= 0
-          then pure (authServerPort, runSettings settings)
-          else openFreePort >>= \(port, socket) -> pure (port, runSettingsSocket settings socket)
-
-      startupMessage = object ["serverPort" .= authServerPort, "passwordsFile" .= passwordsFile]
-
-  (port, appRunner) <- runner
-  serverThread <- async $ appRunner =<< mkApp publicAuthKey authDB
+  appServer <- Server.startAppServer authServerName NoCORS authServerPort (mkApp publicAuthKey authDB)
   reloadThread <- async $ reloadDBOnFileChange passwordsFile reloadInterval authDB
-  pure $ AuthServer [serverThread, reloadThread] (conf {authServerPort = port})
+  pure $ AuthServer appServer { Server.serverThread = reloadThread : Server.serverThread appServer } conf
 
 -- | Periodically checks passwords file for changes and update the in-memory
 -- DB.
@@ -360,19 +348,17 @@ reloadDBOnFileChange (Just pwdFile) reloadInterval authDB = do
 
 -- | Stops given server if it is runninng
 stopServer :: AuthServer -> IO ()
-stopServer (AuthServer threads _) = mapM_ cancel threads
+stopServer (AuthServer appServer _) = Server.stopServer appServer
 
 waitServer :: AuthServer -> IO ()
-waitServer (AuthServer threads _) = void $ waitAnyCancel threads
+waitServer (AuthServer appServer _) = Server.waitServer appServer
 
 -- make actual `Application`
-mkApp :: JWK -> AuthDB -> IO Application
-mkApp key authDB = do
+mkApp :: JWK -> AuthDB -> LoggerEnv -> IO Application
+mkApp key authDB _ = do
   let jwtCfg = defaultJWTSettings key
       authCfg = authCheck authDB
       cookieCfg = defaultCookieSettings
       cfg = jwtCfg :. cookieCfg :. authCfg :. EmptyContext
       api = Proxy :: Proxy AuthAPIServer
-      doLog = mkRequestLogger $ def {outputFormat = CustomOutputFormatWithDetails formatAsJSON}
-  logger <- doLog
-  pure $ logger $ serveWithContext api cfg (loginS authDB cookieCfg jwtCfg :<|> server)
+  pure $ serveWithContext api cfg (loginS authDB cookieCfg jwtCfg :<|> server)

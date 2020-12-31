@@ -1,3 +1,4 @@
+{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Network.Web.AuthSpec where
@@ -33,14 +34,14 @@ spec = around startStopServer $
   describe "Authentication Server" $ do
     let claims = AUser 1 1
 
-    it "authenticates user with a valid user/password on BasicAuth" $ \AuthServer {authServerConfig = AuthConfig {authServerPort}} -> do
+    it "authenticates user with a valid user/password on BasicAuth" $ \ (getServerPort -> authServerPort) -> do
       env <- ClientEnv <$> newManager defaultManagerSettings <*> pure (BaseUrl Http "localhost" authServerPort "") <*> pure Nothing
 
       res <- fmap getResponse <$> validate (BasicAuthData "user" "pass") [] `runClientM` env
 
       res `shouldBe` Right NoContent
 
-    it "can login registered user and returns Cookie" $ \AuthServer {authServerConfig = AuthConfig {authServerPort}} -> do
+    it "can login registered user and returns Cookie" $ \ (getServerPort -> authServerPort) -> do
       cookieJar <- newTVarIO $ createCookieJar []
       env <- ClientEnv <$> newManager defaultManagerSettings <*> pure (BaseUrl Http "localhost" authServerPort "") <*> pure (Just cookieJar)
 
@@ -51,7 +52,7 @@ spec = around startStopServer $
       getResponse <$> resp `shouldBe` Right NoContent
       length cookies `shouldBe` 2
 
-    it "authenticates original OPTIONS query even with an invalid user/password" $ \AuthServer {authServerConfig = AuthConfig {authServerPort}} -> do
+    it "authenticates original OPTIONS query even with an invalid user/password" $ \ (getServerPort -> authServerPort) -> do
       mgr <- newManager defaultManagerSettings
       initialRequest <- parseRequest ("http://localhost:" <> show authServerPort <> "/auth")
       let request =
@@ -65,14 +66,14 @@ spec = around startStopServer $
 
       responseStatus response `shouldBe` ok200
 
-    it "authenticates arbitrary path when user with a valid user/password uses BasicAuth" $ \AuthServer {authServerConfig = AuthConfig {authServerPort}} -> do
+    it "authenticates arbitrary path when user with a valid user/password uses BasicAuth" $ \ (getServerPort -> authServerPort) -> do
       env <- ClientEnv <$> newManager defaultManagerSettings <*> pure (BaseUrl Http "localhost" authServerPort "") <*> pure Nothing
 
       res <- fmap getResponse <$> validate (BasicAuthData "user" "pass") ["foo", "bar"] `runClientM` env
 
       res `shouldBe` Right NoContent
 
-    it "returns www-authenticate header when auth fails" $ \AuthServer {authServerConfig = AuthConfig {authServerPort}} -> do
+    it "returns www-authenticate header when auth fails" $ \ (getServerPort -> authServerPort) -> do
       mgr <- newManager defaultManagerSettings
       initialRequest <- parseRequest ("http://localhost:" <> show authServerPort <> "/auth")
       let request = initialRequest {method = "GET"}
@@ -82,7 +83,7 @@ spec = around startStopServer $
       responseStatus response `shouldBe` unauthorized401
       lookup "www-authenticate" (responseHeaders response) `shouldBe` Just "Basic realm=\"test\""
 
-    it "authenticates user with a valid Authentication header" $ \AuthServer {authServerConfig = AuthConfig {authServerPort}} -> do
+    it "authenticates user with a valid Authentication header" $ \ (getServerPort -> authServerPort) -> do
       Right jwt <- makeJWT claims (defaultJWTSettings sampleKey) Nothing
       mgr <- newManager defaultManagerSettings
       initialRequest <- parseRequest ("http://localhost:" <> show authServerPort <> "/auth")
@@ -97,7 +98,7 @@ spec = around startStopServer $
 
       responseStatus response `shouldBe` ok200
 
-    it "authenticates request from logged in user" $ \AuthServer {authServerConfig = AuthConfig {authServerPort}} -> do
+    it "authenticates request from logged in user" $ \ (getServerPort -> authServerPort) -> do
       cookieJar <- newTVarIO $ createCookieJar []
       mgr <- newManager defaultManagerSettings
       env <- ClientEnv <$> pure mgr <*> pure (BaseUrl Http "localhost" authServerPort "") <*> pure (Just cookieJar)
@@ -118,7 +119,7 @@ spec = around startStopServer $
 
       responseStatus response `shouldBe` ok200
 
-    it "reloads the content of passwords file when it changes" $ \AuthServer {authServerConfig = AuthConfig {authServerPort}} -> do
+    it "reloads the content of passwords file when it changes" $ \ (getServerPort -> authServerPort) -> do
       threadDelay 100000
       createTestDB "user:pass1"
       threadDelay 200000
