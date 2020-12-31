@@ -7,6 +7,7 @@ import Data.Aeson
 import Data.ByteString (ByteString)
 import GHC.Generics
 import Servant.Auth.Server as SAS
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
 
 -- Tokens structure from AWS
 -- AWS ID Token structure
@@ -69,3 +70,21 @@ data Credentials = Credentials
 instance ToJSON Credentials
 
 instance FromJSON Credentials
+
+data UserRegistration = UserRegistration
+  { regLogin :: Text,
+    regPassword :: Text,
+    -- |A Base64-encoded representation of a JWT.
+    regToken :: ByteString
+  }
+  deriving (Eq, Show, Generic)
+
+instance ToJSON UserRegistration where
+  toJSON UserRegistration{..} =
+    object [ "login" .= regLogin,
+             "password" .= regPassword,
+             "token" .= decodeUtf8 regToken ]
+
+instance FromJSON UserRegistration where
+  parseJSON = withObject "UserRegistration" $ \obj ->
+    UserRegistration <$> obj .: "login" <*> obj .: "password" <*> (encodeUtf8 <$> obj .: "token")

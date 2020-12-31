@@ -17,6 +17,7 @@ module Network.Web.Auth
     AuthConfig (..),
     AuthenticatedUser (..),
     Credentials (..),
+    UserRegistration(..),
     defaultConfig,
     defaultPort,
     getServerPort,
@@ -101,7 +102,7 @@ type LoginAPI =
   Summary
     "Allows users to login passing in credentials. If successful, this will set cookies \
     \ containing user's data in the form of JWT token."
-    :> "login"
+    :> "signin"
     :> ReqBody '[JSON] Credentials
     :> Post
          '[JSON]
@@ -111,6 +112,13 @@ type LoginAPI =
               ]
              NoContent
          )
+
+type RegisterAPI =
+  Summary
+  "User registration endpoint. Registration is successful iff. the user provides a valid signed token, which is provided by another user (see the @/tokens@ endpoint)."
+  :> "signup"
+  :> ReqBody '[JSON] UserRegistration
+  :> Post '[JSON] NoContent
 
 type AuthAPI =
   Summary
@@ -134,7 +142,8 @@ type Protected = Auth '[SA.JWT, SA.Cookie, SA.BasicAuth] AuthenticatedUser
 --    is a hashed login:password pair. This is useful only in testing and staging context.
 type AuthAPIServer =
   LoginAPI
-    :<|> Protected :> Header "x-original-method" Text :> AuthAPI
+  :<|> RegisterAPI
+  :<|> Protected :> Header "x-original-method" Text :> AuthAPI
 
 -- ** Basic Client, for testing purpose
 
@@ -173,6 +182,14 @@ loginS authDB cs js (Credentials l p) = do
         Just applyCookies -> return $ applyCookies NoContent
     _ -> throwError err401
 
+registerS
+        :: AuthDB -> JWTSettings -> UserRegistration -> Handler NoContent
+registerS _authDB jwts UserRegistration{..} = do
+  usr <- liftIO $ SAS.verifyJWT jwts regToken
+  case usr of
+    Nothing -> throwError err403
+    Just AUser{} -> pure NoContent
+
 -- | A simple handler that only checks the result of authentication is `Authenticated`
 -- TODO: validate claims
 server ::
@@ -209,4 +226,4 @@ mkApp key authDB _ = do
       cookieCfg = defaultCookieSettings
       cfg = jwtCfg :. cookieCfg :. authCfg :. EmptyContext
       api = Proxy :: Proxy AuthAPIServer
-  pure $ serveWithContext api cfg (loginS authDB cookieCfg jwtCfg :<|> server)
+  pure $ serveWithContext api cfg (loginS authDB cookieCfg jwtCfg :<|> registerS authDB jwtCfg :<|> server)

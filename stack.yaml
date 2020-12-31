@@ -36,7 +36,8 @@ packages:
 # forks / in-progress versions pinned to a git hash. For example:
 #
 extra-deps:
-# - acme-missiles-0.3
+- servant-auth-0.4.0.0
+- servant-auth-server-0.4.6.0
 - git: https://github.com/pankzsoft/servant-server-base.git
   commit: d0f6b637bb102b0f8e637e2d826b2f2586a611f2
 #
