@@ -2,8 +2,7 @@ module Network.Web.DB where
 
 import Control.Concurrent (threadDelay)
 import Control.Exception (IOException, catch, throwIO)
-import Control.Monad (forever, when, foldM)
-import System.Random
+import Control.Monad (foldM, forever, when)
 import Crypto.Hash
 import Crypto.KDF.BCrypt
 import Data.ByteString (ByteString)
@@ -11,7 +10,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base64 as B64
 import Data.IORef
 import qualified Data.Map as M
-import Data.Text(Text)
+import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Text.Encoding
   ( decodeUtf8,
@@ -22,12 +21,18 @@ import Network.Web.Types
 --import Preface.Log
 import Servant as S
 import Servant.Auth.Server as SAS
+import System.Random
 
-type AuthDB = IORef (M.Map Login UserData)
+data AuthDB = AuthDB
+  { dbFile :: FilePath,
+    dbCache :: IORef (M.Map Login UserData)
+  }
 
-data UserData = UserData { userSalt :: ByteString,
-                           userPassword :: ByteString,
-                           userAuth :: AuthenticatedUser }
+data UserData = UserData
+  { userSalt :: ByteString,
+    userPassword :: ByteString,
+    userAuth :: AuthenticatedUser
+  }
 
 -- ** User/Password Authentication
 
@@ -35,17 +40,15 @@ authCheck ::
   AuthDB ->
   BasicAuthData ->
   IO (AuthResult AuthenticatedUser)
-authCheck authDB (BasicAuthData ident password) =
+authCheck (AuthDB _ authDB) (BasicAuthData ident password) =
   readIORef authDB
     >>= pure . maybe SAS.NoSuchUser checkPassword . M.lookup ident
   where
-    checkPassword UserData{..} =
+    checkPassword UserData {..} =
       let encryptedPassword = encrypt userSalt password
-      in
-        if encryptedPassword == userPassword
-        then SAS.Authenticated userAuth
-        else SAS.BadPassword
-
+       in if encryptedPassword == userPassword
+            then SAS.Authenticated userAuth
+            else SAS.BadPassword
 
 encrypt :: ByteString -> ByteString -> ByteString
 encrypt salt = bcrypt cost salt
@@ -58,37 +61,55 @@ cost = 10
 makeDB :: FilePath -> Text -> IO ()
 makeDB file pwds = do
   let encodeLogin lns (l : p : _) = do
-        g <- newStdGen
-        let s = BS.pack $ take 16 $ randoms g
-            ln = l <> ":" <> decodeUtf8 (B64.encode s) <> ":" <> decodeUtf8 (B64.encode (encrypt s (encodeUtf8 p)))
+        ln <- makeDBEntry l p
         pure (ln : lns)
       encodeLogin _ other = throwIO $ userError $ "invalid password entry " <> show other
-  l <- foldM encodeLogin [] $
-       fmap (Text.splitOn ":") $
-       Text.lines pwds
+  l <-
+    foldM encodeLogin [] $
+      fmap (Text.splitOn ":") $
+        Text.lines pwds
   Text.writeFile file (Text.unlines l)
 
+makeDBEntry :: Text -> Text -> IO Text
+makeDBEntry l p = do
+  g <- newStdGen
+  let s = BS.pack $ take 16 $ randoms g
+  pure $ l <> ":" <> decodeUtf8 (B64.encode s) <> ":" <> decodeUtf8 (B64.encode (encrypt s (encodeUtf8 p)))
+
+data DBError
+  = GenericDBError {reason :: Text}
+  | DuplicateUserEntry Text
+  deriving (Eq, Show)
+
+registerUser :: AuthDB -> Text -> Text -> IO (Either DBError AuthenticatedUser)
+registerUser (AuthDB pwdFile db) login pwd = do
+  usrs <- readIORef db
+  case M.lookup (encodeUtf8 login) usrs of
+    Just _ -> undefined
+    Nothing -> do
+      e <- makeDBEntry login pwd
+      Text.appendFile pwdFile (e <> "\n")
+      readPasswordsFile pwdFile >>= atomicWriteIORef db
+      fmap userAuth . maybe (Left $ GenericDBError "failed to register user") Right . M.lookup (encodeUtf8 login) <$> readIORef db
 
 readDB :: Maybe FilePath -> IO AuthDB
-readDB Nothing = newIORef M.empty
-readDB (Just pwdFile) = newIORef =<< readPasswordsFile pwdFile
+readDB Nothing = AuthDB "" <$> newIORef mempty
+readDB (Just pwdFile) = AuthDB pwdFile <$> (readPasswordsFile pwdFile >>= newIORef)
 
 readPasswordsFile :: FilePath -> IO (M.Map Login UserData)
 readPasswordsFile pwdFile =
   M.fromList
-  . fmap (\ ((l,s,p),u) -> (l, UserData s p u))
+    . fmap (\((l, s, p), u) -> (l, UserData s p u))
     . flip zip (fmap (flip AUser 1) [1 ..])
     . fmap (\(l : s : p : _) -> (encodeUtf8 l, either (const "") id $ B64.decode $ encodeUtf8 s, either (const "") id $ B64.decode $ encodeUtf8 p))
     . fmap (Text.splitOn ":")
     . Text.lines
     <$> Text.readFile pwdFile
 
-
 -- | Periodically checks passwords file for changes and update the in-memory
 -- DB.
-reloadDBOnFileChange :: Maybe FilePath -> Int -> AuthDB -> IO ()
-reloadDBOnFileChange Nothing _ _ = pure ()
-reloadDBOnFileChange (Just pwdFile) reloadInterval authDB = do
+reloadDBOnFileChange :: Int -> AuthDB -> IO ()
+reloadDBOnFileChange reloadInterval (AuthDB pwdFile authDB) = do
   h <- getHash
   forever $ go h
   where

@@ -26,7 +26,7 @@ module Network.Web.Auth
     stopServer,
 
     -- * Client
-    validate,
+    validate, register,
     login,
 
     -- * Passwords File Operations
@@ -148,9 +148,10 @@ type AuthAPIServer =
 -- ** Basic Client, for testing purpose
 
 type AuthAPIClient =
-  LoginAPI :<|> S.BasicAuth "test" AuthenticatedUser :> AuthAPI
+  LoginAPI :<|> RegisterAPI :<|> S.BasicAuth "test" AuthenticatedUser :> AuthAPI
 
 validate :: BasicAuthData -> [Text] -> ClientM (Headers '[Header "www-authenticate" String] NoContent)
+register :: UserRegistration -> ClientM NoContent
 login ::
   Credentials ->
   ClientM
@@ -160,7 +161,7 @@ login ::
          ]
         NoContent
     )
-login :<|> validate = client (Proxy :: Proxy AuthAPIClient)
+login :<|> register :<|> validate = client (Proxy :: Proxy AuthAPIClient)
 
 -- * Server
 
@@ -184,11 +185,15 @@ loginS authDB cs js (Credentials l p) = do
 
 registerS
         :: AuthDB -> JWTSettings -> UserRegistration -> Handler NoContent
-registerS _authDB jwts UserRegistration{..} = do
+registerS authDB jwts UserRegistration{..} = do
   usr <- liftIO $ SAS.verifyJWT jwts regToken
   case usr of
     Nothing -> throwError err403
-    Just AUser{} -> pure NoContent
+    Just AUser{} -> do
+      res <- liftIO (registerUser authDB regLogin regPassword)
+      case res of
+        Left _ -> throwError err400
+        Right _ -> pure NoContent
 
 -- | A simple handler that only checks the result of authentication is `Authenticated`
 -- TODO: validate claims
@@ -207,7 +212,7 @@ startServer :: AuthConfig -> IO AuthServer
 startServer conf@AuthConfig {authServerPort, authServerName, publicAuthKey, passwordsFile, reloadInterval} = do
   authDB <- readDB passwordsFile
   appServer <- Server.startAppServer authServerName NoCORS authServerPort (mkApp publicAuthKey authDB)
-  reloadThread <- async $ reloadDBOnFileChange passwordsFile reloadInterval authDB
+  reloadThread <- async $ reloadDBOnFileChange reloadInterval authDB
   pure $ AuthServer appServer { Server.serverThread = reloadThread : Server.serverThread appServer } conf
 
 
