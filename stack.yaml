@@ -39,7 +39,7 @@ extra-deps:
 - servant-auth-0.4.0.0
 - servant-auth-server-0.4.6.0
 - git: https://github.com/pankzsoft/servant-server-base.git
-  commit: d0f6b637bb102b0f8e637e2d826b2f2586a611f2
+  commit: e0009f681ee1b85094e8ebebca96adbd1a172db6
 #
 # extra-deps: []
 

@@ -38,7 +38,8 @@ import Test.Hspec
 spec :: Spec
 spec = parallel $ around startStopServer $
   describe "Authentication Server" $ do
-    let claims = AUser 1 1
+    let claims = AuthToken 1 1
+        registration = RegToken 1 "12345678901234567890123456789012"
 
     it "authenticates user with a valid user/password on BasicAuth" $ \(getServerPort -> authServerPort, mgr) -> do
       env <- newClientEnv mgr authServerPort
@@ -48,7 +49,7 @@ spec = parallel $ around startStopServer $
       res `shouldBe` Right NoContent
 
     it "can register user/password given a valid registration token" $ \(getServerPort -> authServerPort, mgr) -> do
-      validRegistrationToken <- signedTokenFor claims sampleKey
+      validRegistrationToken <- registrationTokenFor registration sampleKey
       let userRegistration = UserRegistration "user1" "pass1" (LBS.toStrict validRegistrationToken)
       initialRequest <- parseRequest ("http://localhost:" <> show authServerPort <> "/signup")
       let request =
@@ -63,7 +64,7 @@ spec = parallel $ around startStopServer $
       responseStatus response `shouldBe` ok200
 
     it "cannot register user/password given an invalid registration token" $ \(getServerPort -> authServerPort, mgr) -> do
-      invalidRegistrationToken <- signedTokenFor claims wrongKey
+      invalidRegistrationToken <- registrationTokenFor registration wrongKey
       let userRegistration = UserRegistration "user1" "pass1" (LBS.toStrict invalidRegistrationToken)
       initialRequest <- parseRequest ("http://localhost:" <> show authServerPort <> "/signup")
       let request =
@@ -78,7 +79,7 @@ spec = parallel $ around startStopServer $
       responseStatus response `shouldBe` forbidden403
 
     it "can login with password once registered" $ \(getServerPort -> authServerPort, mgr) -> do
-      validRegistrationToken <- signedTokenFor claims sampleKey
+      validRegistrationToken <- registrationTokenFor registration sampleKey
       let userRegistration = UserRegistration "user1" "pass1" (LBS.toStrict validRegistrationToken)
       env <- newClientEnv mgr authServerPort
 
@@ -87,6 +88,17 @@ spec = parallel $ around startStopServer $
       getResponse <$> resp `shouldBe` Right NoContent
 
     it "can login registered user and returns Cookie" $ \(getServerPort -> authServerPort, mgr) -> do
+      cookieJar <- newTVarIO $ createCookieJar []
+      env <- ClientEnv <$> pure mgr <*> pure (BaseUrl Http "localhost" authServerPort "") <*> pure (Just cookieJar)
+
+      resp <- login (Credentials "user" "pass") `runClientM` env
+
+      cookies <- destroyCookieJar <$> atomically (readTVar cookieJar)
+
+      getResponse <$> resp `shouldBe` Right NoContent
+      length cookies `shouldBe` 2
+
+    it "logged in user can retrieve a token" $ \(getServerPort -> authServerPort, mgr) -> do
       cookieJar <- newTVarIO $ createCookieJar []
       env <- ClientEnv <$> pure mgr <*> pure (BaseUrl Http "localhost" authServerPort "") <*> pure (Just cookieJar)
 
@@ -127,7 +139,7 @@ spec = parallel $ around startStopServer $
       lookup "www-authenticate" (responseHeaders response) `shouldBe` Just "Basic realm=\"test\""
 
     it "authenticates user with a valid Authentication header" $ \(getServerPort -> authServerPort, mgr) -> do
-      jwt <- signedTokenFor claims sampleKey
+      jwt <- authTokenFor claims sampleKey
       initialRequest <- parseRequest ("http://localhost:" <> show authServerPort <> "/auth")
       let request =
             initialRequest
@@ -170,8 +182,11 @@ spec = parallel $ around startStopServer $
 
       res `shouldBe` Right NoContent
 
-signedTokenFor :: AuthenticatedUser -> JWK -> IO LBS.ByteString
-signedTokenFor claims key = either (error . show) id <$> makeJWT claims (defaultJWTSettings key) Nothing
+authTokenFor :: AuthenticationToken -> JWK -> IO LBS.ByteString
+authTokenFor claims key = either (error . show) id <$> makeJWT claims (defaultJWTSettings key) Nothing
+
+registrationTokenFor :: RegistrationToken -> JWK -> IO LBS.ByteString
+registrationTokenFor claims key = either (error . show) id <$> makeJWT claims (defaultJWTSettings key) Nothing
 
 newClientEnv :: Applicative f => Manager -> Int -> f ClientEnv
 newClientEnv mgr authServerPort = ClientEnv <$> pure mgr <*> pure (BaseUrl Http "localhost" authServerPort "") <*> pure Nothing

@@ -31,7 +31,7 @@ data AuthDB = AuthDB
 data UserData = UserData
   { userSalt :: ByteString,
     userPassword :: ByteString,
-    userAuth :: AuthenticatedUser
+    userAuth :: AuthenticationToken
   }
 
 -- ** User/Password Authentication
@@ -39,7 +39,7 @@ data UserData = UserData
 authCheck ::
   AuthDB ->
   BasicAuthData ->
-  IO (AuthResult AuthenticatedUser)
+  IO (AuthResult AuthenticationToken)
 authCheck (AuthDB _ authDB) (BasicAuthData ident password) =
   readIORef authDB
     >>= pure . maybe SAS.NoSuchUser checkPassword . M.lookup ident
@@ -81,7 +81,7 @@ data DBError
   | DuplicateUserEntry Text
   deriving (Eq, Show)
 
-registerUser :: AuthDB -> Text -> Text -> IO (Either DBError AuthenticatedUser)
+registerUser :: AuthDB -> Text -> Text -> IO (Either DBError AuthenticationToken)
 registerUser (AuthDB pwdFile db) login pwd = do
   usrs <- readIORef db
   case M.lookup (encodeUtf8 login) usrs of
@@ -100,7 +100,7 @@ readPasswordsFile :: FilePath -> IO (M.Map Login UserData)
 readPasswordsFile pwdFile =
   M.fromList
     . fmap (\((l, s, p), u) -> (l, UserData s p u))
-    . flip zip (fmap (flip AUser 1) [1 ..])
+    . flip zip (fmap (flip AuthToken 1) [1 ..])
     . fmap (\(l : s : p : _) -> (encodeUtf8 l, either (const "") id $ B64.decode $ encodeUtf8 s, either (const "") id $ B64.decode $ encodeUtf8 p))
     . fmap (Text.splitOn ":")
     . Text.lines

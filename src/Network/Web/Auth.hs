@@ -15,7 +15,8 @@ more details.
 module Network.Web.Auth
   ( AuthServer (..),
     AuthConfig (..),
-    AuthenticatedUser (..),
+    AuthenticationToken (..),
+    RegistrationToken(..),
     Credentials (..),
     UserRegistration(..),
     defaultConfig,
@@ -130,13 +131,13 @@ type AuthAPI =
     :> Get '[JSON] (Headers '[Header "www-authenticate" String] NoContent)
 
 -- endpoints are protected with JWT and Cookie authentication scheme
-type Protected = Auth '[SA.JWT, SA.Cookie, SA.BasicAuth] AuthenticatedUser
+type Protected = Auth '[SA.JWT, SA.Cookie, SA.BasicAuth] AuthenticationToken
 
 -- | Authentication endpoint
 -- this provides 2 authentication schemes for users:
 --
 --  * `JWT`: Expects an @Authorization: Bearer XXXX@ header in the query with claims
---    of the shape of `AuthenticatedUser`. This should be provided by an external auth
+--    of the shape of `AuthenticationToken`. This should be provided by an external auth
 --    provider
 --  * `BasicAuth`: Expects an @Authorization: Basic XXXX@ header in the query where @XXX@
 --    is a hashed login:password pair. This is useful only in testing and staging context.
@@ -148,7 +149,7 @@ type AuthAPIServer =
 -- ** Basic Client, for testing purpose
 
 type AuthAPIClient =
-  LoginAPI :<|> RegisterAPI :<|> S.BasicAuth "test" AuthenticatedUser :> AuthAPI
+  LoginAPI :<|> RegisterAPI :<|> S.BasicAuth "test" AuthenticationToken :> AuthAPI
 
 validate :: BasicAuthData -> [Text] -> ClientM (Headers '[Header "www-authenticate" String] NoContent)
 register :: UserRegistration -> ClientM NoContent
@@ -189,7 +190,7 @@ registerS authDB jwts UserRegistration{..} = do
   usr <- liftIO $ SAS.verifyJWT jwts regToken
   case usr of
     Nothing -> throwError err403
-    Just AUser{} -> do
+    Just RegToken{} -> do
       res <- liftIO (registerUser authDB regLogin regPassword)
       case res of
         Left _ -> throwError err400
