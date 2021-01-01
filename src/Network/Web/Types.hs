@@ -76,7 +76,7 @@ data AuthenticationToken = AuthToken
   { auID :: Int,
     auOrgID :: Int
   }
-  deriving (Show, Generic)
+  deriving (Eq, Show, Generic)
 
 instance ToJSON AuthenticationToken
 
@@ -92,7 +92,7 @@ data RegistrationToken = RegToken
     regID :: Int,
     tokID :: TokenID
   }
-  deriving (Show, Generic)
+  deriving (Eq, Show, Generic)
 
 instance ToJSON RegistrationToken
 

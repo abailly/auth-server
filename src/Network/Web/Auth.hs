@@ -41,6 +41,7 @@ import Control.Concurrent.Async
 import Control.Monad.Trans
 import Crypto.JOSE
 import Data.Aeson
+import qualified Data.ByteString.Lazy as LBS
 import Data.Proxy
 import Data.Text(Text)
 import Network.Web.DB
@@ -53,6 +54,7 @@ import GHC.Generics
 import Network.Wai.Handler.Warp
 import Network.CORS
 import Preface.Log
+import Preface.Codec
 import qualified Preface.Server as Server
 import Servant as S
 import Servant.Auth as SA
@@ -116,10 +118,20 @@ type LoginAPI =
 
 type RegisterAPI =
   Summary
-  "User registration endpoint. Registration is successful iff. the user provides a valid signed token, which is provided by another user (see the @/tokens@ endpoint)."
+  "User registration endpoint. Registration is successful iff. the user \
+  \ provides a valid signed token, which is provided by another user \
+  \ (see the @/tokens@ endpoint)."
   :> "signup"
   :> ReqBody '[JSON] UserRegistration
   :> Post '[JSON] NoContent
+
+type TokensAPI =
+  Summary
+  "Registration tokens creation endpoint. An already authenticated user can retrieve tokens to share with \
+  \ other users and let them register with this app."
+  :> "tokens"
+  :> Get '[OctetStream] LBS.ByteString
+
 
 type AuthAPI =
   Summary
@@ -144,6 +156,7 @@ type Protected = Auth '[SA.JWT, SA.Cookie, SA.BasicAuth] AuthenticationToken
 type AuthAPIServer =
   LoginAPI
   :<|> RegisterAPI
+  :<|> Protected :> TokensAPI
   :<|> Protected :> Header "x-original-method" Text :> AuthAPI
 
 -- ** Basic Client, for testing purpose
@@ -196,6 +209,17 @@ registerS authDB jwts UserRegistration{..} = do
         Left _ -> throwError err400
         Right _ -> pure NoContent
 
+tokensS
+        :: JWTSettings -> AuthResult AuthenticationToken -> Handler LBS.ByteString
+tokensS jwts (Authenticated AuthToken{auID}) = do
+  tid <- liftIO  $ genRandomBaseHex 16
+  let regToken = RegToken auID (TokenID $ Bytes tid)
+  res <- liftIO $ makeJWT regToken jwts Nothing
+  case res of
+    Left _err -> throwError err500
+    Right tok -> pure tok
+tokensS _ _ = throwError err403
+
 -- | A simple handler that only checks the result of authentication is `Authenticated`
 -- TODO: validate claims
 server ::
@@ -232,4 +256,4 @@ mkApp key authDB _ = do
       cookieCfg = defaultCookieSettings
       cfg = jwtCfg :. cookieCfg :. authCfg :. EmptyContext
       api = Proxy :: Proxy AuthAPIServer
-  pure $ serveWithContext api cfg (loginS authDB cookieCfg jwtCfg :<|> registerS authDB jwtCfg :<|> server)
+  pure $ serveWithContext api cfg (loginS authDB cookieCfg jwtCfg :<|> registerS authDB jwtCfg :<|> tokensS jwtCfg :<|> server)
