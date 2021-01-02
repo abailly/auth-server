@@ -1,4 +1,5 @@
 import Data.Aeson (eitherDecode)
+import Data.Text(pack)
 import qualified Data.Text.Lazy as Text
 import Data.Text.Lazy.Encoding (encodeUtf8)
 import Network.Web.Auth
@@ -9,7 +10,8 @@ main = do
   key <- getKey <$> lookupEnv "AUTH_SERVER_JWK"
   port <- maybe defaultPort read <$> lookupEnv "AUTH_SERVER_PORT"
   passwords <- lookupEnv "AUTH_SERVER_PASSWORDS"
-  startServer (AuthConfig port passwords 5000000 key) >>= waitServer
+  serverName <- maybe "localhost" pack <$> lookupEnv "AUTH_SERVER_NAME"
+  startServer (AuthConfig port serverName passwords 5000000 key) >>= waitServer
   where
     getKey Nothing = error "Environment variable AUTH_SERVER_JWK is not set"
     getKey (Just k) = either (error "environment variable 'AUTH_SERVER_JWK' is not set to a valid JWK key: ") id (eitherDecode $ encodeUtf8 $ Text.pack k)
