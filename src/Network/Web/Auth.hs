@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -188,7 +189,7 @@ loginS ::
   Credentials ->
   Handler (Headers '[Header "Set-Cookie" SetCookie, Header "Set-Cookie" SetCookie] NoContent)
 loginS authDB cs js (Credentials l p) = do
-  res <- liftIO $ authCheck authDB (BasicAuthData (encodeUtf8 l) (encodeUtf8 p))
+  res <- runDB authDB (authCheck (BasicAuthData (encodeUtf8 l) (encodeUtf8 p)))
   case res of
     Authenticated usr -> do
       mApplyCookies <- liftIO $ acceptLogin cs js usr
@@ -204,7 +205,7 @@ registerS authDB jwts UserRegistration{..} = do
   case usr of
     Nothing -> throwError err403
     Just RegToken{} -> do
-      res <- liftIO (registerUser authDB regLogin regPassword)
+      res <- runDB authDB (registerUser regLogin regPassword)
       case res of
         Left _ -> throwError err400
         Right _ -> pure NoContent
@@ -252,7 +253,7 @@ waitServer (AuthServer appServer _) = Server.waitServer appServer
 mkApp :: JWK -> AuthDB -> LoggerEnv -> IO Application
 mkApp key authDB _ = do
   let jwtCfg = defaultJWTSettings key
-      authCfg = authCheck authDB
+      authCfg = runDB @IO authDB . authCheck
       cookieCfg = defaultCookieSettings
       cfg = jwtCfg :. cookieCfg :. authCfg :. EmptyContext
       api = Proxy :: Proxy AuthAPIServer

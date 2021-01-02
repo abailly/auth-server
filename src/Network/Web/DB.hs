@@ -1,8 +1,8 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Network.Web.DB where
 
 import Control.Concurrent (threadDelay)
 import Control.Exception (IOException, catch, throwIO)
-import Control.Monad (foldM, forever, when)
 import Crypto.Hash
 import Crypto.KDF.BCrypt
 import Data.ByteString (ByteString)
@@ -22,6 +22,7 @@ import Network.Web.Types
 import Servant as S
 import Servant.Auth.Server as SAS
 import System.Random
+import Control.Monad.Reader
 
 data AuthDB = AuthDB
   { dbFile :: FilePath,
@@ -34,14 +35,20 @@ data UserData = UserData
     userAuth :: AuthenticationToken
   }
 
+newtype FileDB a = FileDB { runFileDB :: ReaderT AuthDB IO a }
+  deriving (Functor, Applicative, Monad, MonadIO, MonadReader AuthDB)
+
+runDB :: MonadIO m => AuthDB -> FileDB a -> m a
+runDB authDB a = liftIO $ runFileDB a  `runReaderT` authDB
+
 -- ** User/Password Authentication
 
 authCheck ::
-  AuthDB ->
   BasicAuthData ->
-  IO (AuthResult AuthenticationToken)
-authCheck (AuthDB _ authDB) (BasicAuthData ident password) =
-  readIORef authDB
+  FileDB (AuthResult AuthenticationToken)
+authCheck (BasicAuthData ident password) = do
+  (AuthDB _ authDB) <- ask
+  liftIO $ readIORef authDB
     >>= pure . maybe SAS.NoSuchUser checkPassword . M.lookup ident
   where
     checkPassword UserData {..} =
@@ -51,7 +58,7 @@ authCheck (AuthDB _ authDB) (BasicAuthData ident password) =
             else SAS.BadPassword
 
 encrypt :: ByteString -> ByteString -> ByteString
-encrypt salt = bcrypt cost salt
+encrypt = bcrypt cost
 
 cost :: Int
 cost = 10
@@ -66,8 +73,8 @@ makeDB file pwds = do
       encodeLogin _ other = throwIO $ userError $ "invalid password entry " <> show other
   l <-
     foldM encodeLogin [] $
-      fmap (Text.splitOn ":") $
-        Text.lines pwds
+      Text.splitOn ":"
+        <$> Text.lines pwds
   Text.writeFile file (Text.unlines l)
 
 makeDBEntry :: Text -> Text -> IO Text
@@ -81,12 +88,13 @@ data DBError
   | DuplicateUserEntry Text
   deriving (Eq, Show)
 
-registerUser :: AuthDB -> Text -> Text -> IO (Either DBError AuthenticationToken)
-registerUser (AuthDB pwdFile db) login pwd = do
-  usrs <- readIORef db
+registerUser :: Text -> Text -> FileDB (Either DBError AuthenticationToken)
+registerUser login pwd = do
+  (AuthDB pwdFile db) <- ask
+  usrs <- liftIO $ readIORef db
   case M.lookup (encodeUtf8 login) usrs of
     Just _ -> undefined
-    Nothing -> do
+    Nothing -> liftIO $ do
       e <- makeDBEntry login pwd
       Text.appendFile pwdFile (e <> "\n")
       readPasswordsFile pwdFile >>= atomicWriteIORef db
