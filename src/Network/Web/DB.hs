@@ -1,9 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Network.Web.DB where
 
-import Control.Concurrent (threadDelay)
-import Control.Exception (IOException, catch, throwIO)
-import Crypto.Hash
+import Control.Exception (throwIO)
 import Crypto.KDF.BCrypt
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
@@ -41,12 +39,20 @@ newtype FileDB a = FileDB { runFileDB :: ReaderT AuthDB IO a }
 runDB :: MonadIO m => AuthDB -> FileDB a -> m a
 runDB authDB a = liftIO $ runFileDB a  `runReaderT` authDB
 
+class DB db where
+  authCheck :: BasicAuthData -> db (AuthResult AuthenticationToken)
+  registerUser :: Text -> Text -> db (Either DBError AuthenticationToken)
+
+instance DB FileDB where
+  authCheck = authCheck'
+  registerUser = registerUser'
+
 -- ** User/Password Authentication
 
-authCheck ::
+authCheck' ::
   BasicAuthData ->
   FileDB (AuthResult AuthenticationToken)
-authCheck (BasicAuthData ident password) = do
+authCheck' (BasicAuthData ident password) = do
   (AuthDB _ authDB) <- ask
   liftIO $ readIORef authDB
     >>= pure . maybe SAS.NoSuchUser checkPassword . M.lookup ident
@@ -88,8 +94,8 @@ data DBError
   | DuplicateUserEntry Text
   deriving (Eq, Show)
 
-registerUser :: Text -> Text -> FileDB (Either DBError AuthenticationToken)
-registerUser login pwd = do
+registerUser' :: Text -> Text -> FileDB (Either DBError AuthenticationToken)
+registerUser' login pwd = do
   (AuthDB pwdFile db) <- ask
   usrs <- liftIO $ readIORef db
   case M.lookup (encodeUtf8 login) usrs of
@@ -113,22 +119,3 @@ readPasswordsFile pwdFile =
     . fmap (Text.splitOn ":")
     . Text.lines
     <$> Text.readFile pwdFile
-
--- | Periodically checks passwords file for changes and update the in-memory
--- DB.
-reloadDBOnFileChange :: Int -> AuthDB -> IO ()
-reloadDBOnFileChange reloadInterval (AuthDB pwdFile authDB) = do
-  h <- getHash
-  forever $ go h
-  where
-    go h =
-      ( do
-          threadDelay reloadInterval
-          h' <- getHash
-          when (h /= h') $
-            (readPasswordsFile pwdFile >>= atomicWriteIORef authDB)
-      )
-        `catch` \(e :: IOException) -> putStrLn (show e)
-
-    getHash :: IO (Digest SHA1)
-    getHash = hash <$> BS.readFile pwdFile

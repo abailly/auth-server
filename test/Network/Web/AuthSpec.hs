@@ -194,15 +194,6 @@ spec = parallel $
 
         responseStatus response `shouldBe` ok200
 
-      it "reloads the content of passwords file when it changes" $ \(getServerPort -> authServerPort, dbName, mgr) -> do
-        threadDelay 100000
-        _ <- createTestDB "user:pass1" (Just dbName)
-        threadDelay 200000
-        env <- newClientEnv mgr authServerPort
-
-        res <- fmap getResponse <$> validate (BasicAuthData "user" "pass1") [] `runClientM` env
-
-        res `shouldBe` Right NoContent
 
 authTokenFor :: AuthenticationToken -> JWK -> IO LBS.ByteString
 authTokenFor claims key = either (error . show) id <$> makeJWT claims (defaultJWTSettings key) Nothing
@@ -239,7 +230,7 @@ startStopServer act = bracket prepareServer (\(s, dbName,  _) -> removePathForci
     prepareServer = do
       mgr <- newManager defaultManagerSettings
       dbName <- createTestDB "user:pass" Nothing
-      server <- startServer (defaultConfig sampleKey) {authServerPort = 0, passwordsFile = Just dbName, reloadInterval = 100000}
+      server <- startServer (defaultConfig sampleKey) {authServerPort = 0, passwordsFile = Just dbName }
       pure (server, dbName, mgr)
 
 sampleKey, wrongKey :: JWK

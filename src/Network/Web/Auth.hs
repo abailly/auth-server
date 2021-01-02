@@ -36,9 +36,6 @@ module Network.Web.Auth
   )
 where
 
-import Control.Concurrent.Async
-  (     async,
-  )
 import Control.Monad.Trans
 import Crypto.JOSE
 import Data.Aeson
@@ -85,8 +82,6 @@ data AuthConfig = AuthConfig
     --  scheme. File should contain one login:password per line, with
     --  password being encrypted using publicAuthKey
     passwordsFile :: Maybe FilePath,
-    -- | Time interval (in us) between checks for passwords file changes
-    reloadInterval :: Int,
     -- | The key used to validate and sign authentication tokens
     publicAuthKey :: JWK
   }
@@ -97,7 +92,7 @@ instance ToJSON AuthConfig
 instance FromJSON AuthConfig
 
 defaultConfig :: JWK -> AuthConfig
-defaultConfig = AuthConfig defaultPort "localhost:3001" Nothing 5000000
+defaultConfig = AuthConfig defaultPort "localhost:3001" Nothing
 
 defaultPort :: Int
 defaultPort = 3001
@@ -235,11 +230,10 @@ server _ _ _ = throwAll err401 {errHeaders = [("www-authenticate", "Basic realm=
 
 -- | Starts server with given configuration
 startServer :: AuthConfig -> IO AuthServer
-startServer conf@AuthConfig {authServerPort, authServerName, publicAuthKey, passwordsFile, reloadInterval} = do
+startServer conf@AuthConfig {authServerPort, authServerName, publicAuthKey, passwordsFile} = do
   authDB <- readDB passwordsFile
   appServer <- Server.startAppServer authServerName NoCORS authServerPort (mkApp publicAuthKey authDB)
-  reloadThread <- async $ reloadDBOnFileChange reloadInterval authDB
-  pure $ AuthServer appServer { Server.serverThread = reloadThread : Server.serverThread appServer } conf
+  pure $ AuthServer appServer conf
 
 
 -- | Stops given server if it is runninng
