@@ -99,7 +99,7 @@ registerUser' login pwd = do
   (AuthDB pwdFile db) <- ask
   usrs <- liftIO $ readIORef db
   case M.lookup (encodeUtf8 login) usrs of
-    Just _ -> undefined
+    Just _ -> pure $ Left $ DuplicateUserEntry login
     Nothing -> liftIO $ do
       e <- makeDBEntry login pwd
       Text.appendFile pwdFile (e <> "\n")

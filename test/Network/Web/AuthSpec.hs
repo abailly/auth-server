@@ -28,7 +28,7 @@ import Network.HTTP.Client
     responseHeaders,
     responseStatus,
   )
-import Network.HTTP.Types.Status (forbidden403, ok200, unauthorized401)
+import Network.HTTP.Types.Status (forbidden403, ok200, badRequest400, unauthorized401)
 import Network.Web.Auth
 import Servant
 import Servant.Auth.Server
@@ -80,6 +80,23 @@ spec = parallel $
         response <- httpLbs request mgr
 
         responseStatus response `shouldBe` forbidden403
+
+      it "cannot register twice same user" $ \(getServerPort -> authServerPort, _, mgr) -> do
+        validRegistrationToken <- registrationTokenFor registration sampleKey
+        let userRegistration = UserRegistration "user1" "pass1" (LBS.toStrict validRegistrationToken)
+        initialRequest <- parseRequest ("http://localhost:" <> show authServerPort <> "/signup")
+        let request =
+              initialRequest
+                { method = "POST",
+                  requestHeaders =
+                    [("content-type", "application/json")],
+                  requestBody = RequestBodyLBS $ encode userRegistration
+                }
+        _ <- httpLbs request mgr
+
+        response <- httpLbs request mgr
+
+        responseStatus response `shouldBe` badRequest400
 
       it "can login with password once registered" $ \(getServerPort -> authServerPort, _, mgr) -> do
         validRegistrationToken <- registrationTokenFor registration sampleKey
