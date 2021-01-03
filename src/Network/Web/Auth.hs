@@ -33,6 +33,9 @@ module Network.Web.Auth
 
     -- * Passwords File Operations
     makeDB,
+
+    -- * Key generation
+    makeNewKey,
   )
 where
 

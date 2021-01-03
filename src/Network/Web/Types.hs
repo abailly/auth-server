@@ -9,6 +9,7 @@ import Data.Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Proxy
+import Crypto.JOSE.JWK
 import Data.String (IsString (..))
 import Data.Text (Text)
 import Data.Text.Encoding (decodeUtf8, encodeUtf8)
@@ -138,3 +139,7 @@ instance ToJSON UserRegistration where
 instance FromJSON UserRegistration where
   parseJSON = withObject "UserRegistration" $ \obj ->
     UserRegistration <$> obj .: "login" <*> obj .: "password" <*> (encodeUtf8 <$> obj .: "token")
+
+-- | Generate a new random 4096-bits long RSA key pair.
+makeNewKey :: IO JWK
+makeNewKey = genJWK (RSAGenParam (4096 `div` 8))
