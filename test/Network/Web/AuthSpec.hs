@@ -230,7 +230,7 @@ startStopServer act = bracket prepareServer (\(s, dbName,  _) -> removePathForci
     prepareServer = do
       mgr <- newManager defaultManagerSettings
       dbName <- createTestDB "user:pass" Nothing
-      server <- startServer (defaultConfig sampleKey) {authServerPort = 0, passwordsFile = Just dbName }
+      server <- startServer (defaultConfig sampleKey) {authServerPort = 0, passwordsFile = dbName }
       pure (server, dbName, mgr)
 
 sampleKey, wrongKey :: JWK

@@ -11,10 +11,16 @@ main :: IO ()
 main = do
   key <- getKey =<< lookupEnv "AUTH_SERVER_JWK"
   port <- maybe defaultPort read <$> lookupEnv "AUTH_SERVER_PORT"
-  passwords <- lookupEnv "AUTH_SERVER_PASSWORDS"
+  adminPassword <- lookupEnv "AUTH_SERVER_ADMIN_PASSWORD"
+  passwords <- defaultPasswordFile adminPassword =<< lookupEnv "AUTH_SERVER_PASSWORDS"
   serverName <- maybe "localhost" pack <$> lookupEnv "AUTH_SERVER_NAME"
   startServer (AuthConfig port serverName passwords key) >>= waitServer
   where
+    defaultPasswordFile Nothing Nothing = error "neither environment variable 'AUTH_SERVER_PASSWORDS' nor 'AUTH_SERVER_ADMIN_PASSWORD' are set, define one of them"
+    defaultPasswordFile (Just pwd) Nothing = do
+      makeDB ".passwords" ("admin:" <> pack pwd <> "\n")
+      pure ".passwords"
+    defaultPasswordFile _ (Just fp) = pure fp
     getKey Nothing = do
       jwk <- makeNewKey
       BS.writeFile ".auth-server.jwk" $ LBS.toStrict $ encode jwk

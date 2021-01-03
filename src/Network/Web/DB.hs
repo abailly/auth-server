@@ -106,9 +106,8 @@ registerUser' login pwd = do
       readPasswordsFile pwdFile >>= atomicWriteIORef db
       fmap userAuth . maybe (Left $ GenericDBError "failed to register user") Right . M.lookup (encodeUtf8 login) <$> readIORef db
 
-readDB :: Maybe FilePath -> IO AuthDB
-readDB Nothing = AuthDB "" <$> newIORef mempty
-readDB (Just pwdFile) = AuthDB pwdFile <$> (readPasswordsFile pwdFile >>= newIORef)
+readDB :: FilePath -> IO AuthDB
+readDB pwdFile = AuthDB pwdFile <$> (readPasswordsFile pwdFile >>= newIORef)
 
 readPasswordsFile :: FilePath -> IO (M.Map Login UserData)
 readPasswordsFile pwdFile =

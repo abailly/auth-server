@@ -86,7 +86,7 @@ data AuthConfig = AuthConfig
     -- | Optional file to use for authenticating users with Basic auth
     --  scheme. File should contain one login:password per line, with
     --  password being encrypted using publicAuthKey
-    passwordsFile :: !(Maybe FilePath),
+    passwordsFile :: !FilePath,
     -- | The key used to validate and sign authentication tokens
     publicAuthKey :: !JWK
   }
@@ -97,7 +97,7 @@ instance ToJSON AuthConfig
 instance FromJSON AuthConfig
 
 defaultConfig :: JWK -> AuthConfig
-defaultConfig = AuthConfig defaultPort "localhost:3001" Nothing
+defaultConfig = AuthConfig defaultPort "localhost:3001" ".passwords"
 
 defaultPort :: Int
 defaultPort = 3001
