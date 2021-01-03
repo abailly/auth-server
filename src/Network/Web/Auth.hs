@@ -36,12 +36,14 @@ module Network.Web.Auth
   )
 where
 
+import Control.Lens((^.), re)
 import Control.Monad.Trans
 import Crypto.JOSE
 import Data.Aeson
 import qualified Data.ByteString.Lazy as LBS
 import Data.Proxy
 import Data.Text(Text)
+import Data.Text.Strict.Lens(utf8)
 import Network.Web.DB
 import Network.Web.Types
 import Data.Text.Encoding
@@ -75,15 +77,15 @@ getServerPort (AuthServer app _) = Server.serverPort app
 -- | Server configuration
 data AuthConfig = AuthConfig
   { -- | the actual port server is listening on
-    authServerPort :: Port,
+    authServerPort :: !Port,
     -- | The server fully qualified domain name
-    authServerName :: Text,
+    authServerName :: !Text,
     -- | Optional file to use for authenticating users with Basic auth
     --  scheme. File should contain one login:password per line, with
     --  password being encrypted using publicAuthKey
-    passwordsFile :: Maybe FilePath,
+    passwordsFile :: !(Maybe FilePath),
     -- | The key used to validate and sign authentication tokens
-    publicAuthKey :: JWK
+    publicAuthKey :: !JWK
   }
   deriving (Eq, Show, Generic)
 
@@ -228,11 +230,17 @@ server (Authenticated _) _ _ = handleValidate
     handleValidate = pure $ noHeader NoContent
 server _ _ _ = throwAll err401 {errHeaders = [("www-authenticate", "Basic realm=\"test\"")]}
 
+data Startup = Startup { startName :: Text, startPort :: Int, startKey :: JWK}
+
+instance ToJSON Startup where
+  toJSON Startup{..} = object [ "start_name" .= startName, "start_port" .= startPort, "start_key" .= (startKey ^. (thumbprint @SHA256) . re (base64url . digest) . utf8) ]
+
 -- | Starts server with given configuration
 startServer :: AuthConfig -> IO AuthServer
 startServer conf@AuthConfig {authServerPort, authServerName, publicAuthKey, passwordsFile} = do
   authDB <- readDB passwordsFile
   appServer <- Server.startAppServer authServerName NoCORS authServerPort (mkApp publicAuthKey authDB)
+  logInfo (Server.serverLogger appServer) $ Startup (Server.serverName appServer) (Server.serverPort appServer) publicAuthKey
   pure $ AuthServer appServer conf
 
 
