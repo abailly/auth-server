@@ -53,7 +53,7 @@ spec = parallel $
 
       it "can register user/password given a valid registration token" $ \(getServerPort -> authServerPort, _, mgr) -> do
         validRegistrationToken <- registrationTokenFor registration sampleKey
-        let userRegistration = UserRegistration "user1" "pass1" (LBS.toStrict validRegistrationToken)
+        let userRegistration = UserRegistration "user1" "pass1" (SerializedToken $ LBS.toStrict validRegistrationToken)
         initialRequest <- parseRequest ("http://localhost:" <> show authServerPort <> "/signup")
         let request =
               initialRequest
@@ -68,7 +68,7 @@ spec = parallel $
 
       it "cannot register user/password given an invalid registration token" $ \(getServerPort -> authServerPort, _, mgr) -> do
         invalidRegistrationToken <- registrationTokenFor registration wrongKey
-        let userRegistration = UserRegistration "user1" "pass1" (LBS.toStrict invalidRegistrationToken)
+        let userRegistration = UserRegistration "user1" "pass1" (SerializedToken $ LBS.toStrict invalidRegistrationToken)
         initialRequest <- parseRequest ("http://localhost:" <> show authServerPort <> "/signup")
         let request =
               initialRequest
@@ -83,7 +83,7 @@ spec = parallel $
 
       it "cannot register twice same user" $ \(getServerPort -> authServerPort, _, mgr) -> do
         validRegistrationToken <- registrationTokenFor registration sampleKey
-        let userRegistration = UserRegistration "user1" "pass1" (LBS.toStrict validRegistrationToken)
+        let userRegistration = UserRegistration "user1" "pass1" (SerializedToken $ LBS.toStrict validRegistrationToken)
         initialRequest <- parseRequest ("http://localhost:" <> show authServerPort <> "/signup")
         let request =
               initialRequest
@@ -100,7 +100,7 @@ spec = parallel $
 
       it "can login with password once registered" $ \(getServerPort -> authServerPort, _, mgr) -> do
         validRegistrationToken <- registrationTokenFor registration sampleKey
-        let userRegistration = UserRegistration "user1" "pass1" (LBS.toStrict validRegistrationToken)
+        let userRegistration = UserRegistration "user1" "pass1" (SerializedToken $ LBS.toStrict validRegistrationToken)
         env <- newClientEnv mgr authServerPort
 
         resp <- (register userRegistration >> login (Credentials "user1" "pass1")) `runClientM` env
@@ -206,6 +206,13 @@ spec = parallel $
                   requestHeaders =
                     [("Authorization", LBS.toStrict $ "Bearer " <> token)]
                 }
+
+        response <- httpLbs request mgr
+
+        responseStatus response `shouldBe` ok200
+
+      it "provides OpenAPI descriptor without authentication" $ \(getServerPort -> authServerPort, _, mgr) -> do
+        request <- parseRequest ("http://localhost:" <> show authServerPort <> "/swagger.json")
 
         response <- httpLbs request mgr
 

@@ -55,11 +55,13 @@ library:
     - servant
     - servant-auth
     - servant-auth-server
+    - servant-auth-swagger
     - servant-server
     - servant-client
     - servant-server-base
     - servant-swagger
     - swagger2
+    - template-haskell
     - text
     - time
     - wai

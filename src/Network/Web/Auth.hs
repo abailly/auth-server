@@ -16,10 +16,7 @@ more details.
 module Network.Web.Auth
   ( AuthServer (..),
     AuthConfig (..),
-    AuthenticationToken (..),
-    RegistrationToken(..),
-    Credentials (..),
-    UserRegistration(..),
+    module Network.Web.Types,
     defaultConfig,
     defaultPort,
     getServerPort,
@@ -33,9 +30,6 @@ module Network.Web.Auth
 
     -- * Passwords File Operations
     makeDB,
-
-    -- * Key generation
-    makeNewKey,
   )
 where
 
@@ -43,7 +37,6 @@ import Control.Lens((^.), re)
 import Control.Monad.Trans
 import Crypto.JOSE
 import Data.Aeson
-import qualified Data.ByteString.Lazy as LBS
 import Data.Proxy
 import Data.Text(Text)
 import Data.Text.Strict.Lens(utf8)
@@ -60,9 +53,11 @@ import Preface.Log
 import Preface.Codec
 import qualified Preface.Server as Server
 import Servant as S
-import Servant.Auth as SA
 import Servant.Auth.Server as SAS
+import Network.Web.API
+import Network.Web.OpenApi
 import Servant.Client
+import qualified Data.ByteString.Lazy as LBS
 
 -- * Types
 
@@ -101,64 +96,6 @@ defaultConfig = AuthConfig defaultPort "localhost:3001" ".passwords"
 
 defaultPort :: Int
 defaultPort = 3001
-
-type LoginAPI =
-  Summary
-    "Allows users to login passing in credentials. If successful, this will set cookies \
-    \ containing user's data in the form of JWT token."
-    :> "signin"
-    :> ReqBody '[JSON] Credentials
-    :> Post
-         '[JSON]
-         ( Headers
-             '[ Header "Set-Cookie" SetCookie,
-                Header "Set-Cookie" SetCookie
-              ]
-             NoContent
-         )
-
-type RegisterAPI =
-  Summary
-  "User registration endpoint. Registration is successful iff. the user \
-  \ provides a valid signed token, which is provided by another user \
-  \ (see the @/tokens@ endpoint)."
-  :> "signup"
-  :> ReqBody '[JSON] UserRegistration
-  :> Post '[JSON] NoContent
-
-type TokensAPI =
-  Summary
-  "Registration tokens creation endpoint. An already authenticated user can retrieve tokens to share with \
-  \ other users and let them register with this app."
-  :> "tokens"
-  :> Get '[OctetStream] LBS.ByteString
-
-
-type AuthAPI =
-  Summary
-    "A endpoint to validate authenticated access. This is expected to be used by a reverse proxy which can query that endpoint, \
-    \ passing an arbitrary target path. This server will verify the passed credentials and potentially return a www-authenticate \
-    \ header to request authentication."
-    :> "auth"
-    :> CaptureAll "path" Text
-    :> Get '[JSON] (Headers '[Header "www-authenticate" String] NoContent)
-
--- endpoints are protected with JWT and Cookie authentication scheme
-type Protected = Auth '[SA.JWT, SA.Cookie, SA.BasicAuth] AuthenticationToken
-
--- | Authentication endpoint
--- this provides 2 authentication schemes for users:
---
---  * `JWT`: Expects an @Authorization: Bearer XXXX@ header in the query with claims
---    of the shape of `AuthenticationToken`. This should be provided by an external auth
---    provider
---  * `BasicAuth`: Expects an @Authorization: Basic XXXX@ header in the query where @XXX@
---    is a hashed login:password pair. This is useful only in testing and staging context.
-type AuthAPIServer =
-  LoginAPI
-  :<|> RegisterAPI
-  :<|> Protected :> TokensAPI
-  :<|> Protected :> Header "x-original-method" Text :> AuthAPI
 
 -- ** Basic Client, for testing purpose
 
@@ -201,7 +138,7 @@ loginS authDB cs js (Credentials l p) = do
 registerS
         :: AuthDB -> JWTSettings -> UserRegistration -> Handler NoContent
 registerS authDB jwts UserRegistration{..} = do
-  usr <- liftIO $ SAS.verifyJWT jwts regToken
+  usr <- liftIO $ SAS.verifyJWT jwts (unToken regToken)
   case usr of
     Nothing -> throwError err403
     Just RegToken{} -> do
@@ -211,14 +148,14 @@ registerS authDB jwts UserRegistration{..} = do
         Right _ -> pure NoContent
 
 tokensS
-        :: JWTSettings -> AuthResult AuthenticationToken -> Handler LBS.ByteString
+        :: JWTSettings -> AuthResult AuthenticationToken -> Handler SerializedToken
 tokensS jwts (Authenticated AuthToken{auID}) = do
   tid <- liftIO  $ genRandomBaseHex 16
   let regToken = RegToken auID (TokenID $ Bytes tid)
   res <- liftIO $ makeJWT regToken jwts Nothing
   case res of
     Left _err -> throwError err500
-    Right tok -> pure tok
+    Right tok -> pure $ SerializedToken (LBS.toStrict tok)
 tokensS _ _ = throwError err403
 
 -- | A simple handler that only checks the result of authentication is `Authenticated`
@@ -254,6 +191,10 @@ stopServer (AuthServer appServer _) = Server.stopServer appServer
 waitServer :: AuthServer -> IO ()
 waitServer (AuthServer appServer _) = Server.waitServer appServer
 
+
+type SwaggerAPI =
+  "swagger.json" :> Get '[JSON] Swagger
+
 -- make actual `Application`
 mkApp :: JWK -> AuthDB -> LoggerEnv -> IO Application
 mkApp key authDB _ = do
@@ -261,5 +202,5 @@ mkApp key authDB _ = do
       authCfg = runDB @IO authDB . authCheck
       cookieCfg = defaultCookieSettings
       cfg = jwtCfg :. cookieCfg :. authCfg :. EmptyContext
-      api = Proxy :: Proxy AuthAPIServer
-  pure $ serveWithContext api cfg (loginS authDB cookieCfg jwtCfg :<|> registerS authDB jwtCfg :<|> tokensS jwtCfg :<|> server)
+      api = Proxy :: Proxy (SwaggerAPI :<|> AuthAPIServer)
+  pure $ serveWithContext api cfg (pure authSwagger :<|> loginS authDB cookieCfg jwtCfg :<|> registerS authDB jwtCfg :<|> tokensS jwtCfg :<|> server)

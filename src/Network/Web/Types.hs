@@ -8,6 +8,7 @@ module Network.Web.Types where
 import Data.Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as LBS
 import Data.Proxy
 import Crypto.JOSE.JWK
 import Data.String (IsString (..))
@@ -16,6 +17,7 @@ import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import GHC.Generics
 import GHC.TypeLits (KnownNat, Nat, natVal)
 import Preface.Codec
+import Servant
 import Servant.Auth.Server as SAS
 
 -- Tokens structure from AWS
@@ -123,8 +125,7 @@ instance FromJSON Credentials
 data UserRegistration = UserRegistration
   { regLogin :: Text,
     regPassword :: Text,
-    -- | A Base64-encoded representation of a JWT.
-    regToken :: ByteString
+    regToken :: SerializedToken
   }
   deriving (Eq, Show, Generic)
 
@@ -133,13 +134,25 @@ instance ToJSON UserRegistration where
     object
       [ "login" .= regLogin,
         "password" .= regPassword,
-        "token" .= decodeUtf8 regToken
+        "token" .= regToken
       ]
 
 instance FromJSON UserRegistration where
   parseJSON = withObject "UserRegistration" $ \obj ->
-    UserRegistration <$> obj .: "login" <*> obj .: "password" <*> (encodeUtf8 <$> obj .: "token")
+    UserRegistration <$> obj .: "login" <*> obj .: "password" <*> obj .: "token"
 
 -- | Generate a new random 4096-bits long RSA key pair.
 makeNewKey :: IO JWK
 makeNewKey = genJWK (RSAGenParam (4096 `div` 8))
+
+newtype SerializedToken = SerializedToken { unToken :: ByteString }
+  deriving (Eq, Show)
+
+instance ToJSON SerializedToken where
+  toJSON (SerializedToken bs) = String $ decodeUtf8 bs
+
+instance FromJSON SerializedToken where
+  parseJSON = withText "SerializedToken" $ \ txt -> pure $ SerializedToken $ encodeUtf8 txt
+
+instance MimeRender OctetStream SerializedToken where
+  mimeRender _ (SerializedToken bs) = LBS.fromStrict bs
