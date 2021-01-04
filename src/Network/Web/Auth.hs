@@ -191,7 +191,6 @@ stopServer (AuthServer appServer _) = Server.stopServer appServer
 waitServer :: AuthServer -> IO ()
 waitServer (AuthServer appServer _) = Server.waitServer appServer
 
-
 type SwaggerAPI =
   "swagger.json" :> Get '[JSON] Swagger
 
