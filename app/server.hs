@@ -6,9 +6,11 @@ import qualified Data.Text.Lazy as Text
 import Data.Text.Lazy.Encoding (encodeUtf8)
 import Network.Web.Auth
 import System.Environment (lookupEnv)
+import System.IO
 
 main :: IO ()
 main = do
+  hSetBuffering stdout NoBuffering
   key <- getKey =<< lookupEnv "AUTH_SERVER_JWK"
   port <- maybe defaultPort read <$> lookupEnv "AUTH_SERVER_PORT"
   adminPassword <- lookupEnv "AUTH_SERVER_ADMIN_PASSWORD"
