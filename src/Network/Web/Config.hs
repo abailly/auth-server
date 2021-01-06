@@ -40,8 +40,8 @@ defaultConfig = AuthConfig defaultPort "localhost:3001" ".passwords"
 defaultPort :: Int
 defaultPort = 3001
 
-makeConfig :: IO AuthConfig
-makeConfig = do
+makeConfig :: FilePath -> IO AuthConfig
+makeConfig jwkFile = do
   key <- lookupEnv "AUTH_SERVER_JWK" >>= getKey
   port <- lookupEnv "AUTH_SERVER_PORT" <&> maybe defaultPort read
   adminPassword <- lookupEnv "AUTH_SERVER_ADMIN_PASSWORD"
@@ -58,6 +58,6 @@ makeConfig = do
 
     getKey Nothing = do
       jwk <- makeNewKey
-      BS.writeFile ".auth-server.jwk" $ LBS.toStrict $ encode jwk
+      BS.writeFile jwkFile $ LBS.toStrict $ encode jwk
       pure jwk
     getKey (Just k) = either (error "environment variable 'AUTH_SERVER_JWK' is not set to a valid JWK key: ") pure (eitherDecode $ encodeUtf8 $ Text.pack k)
