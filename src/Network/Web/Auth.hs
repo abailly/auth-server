@@ -1,9 +1,8 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
@@ -25,39 +24,41 @@ module Network.Web.Auth
     stopServer,
 
     -- * Client
-    validate, register,
+    validate,
+    register,
     login,
 
     -- * Passwords File Operations
     makeDB,
+
+    -- * Configuration
+    makeConfig,
   )
 where
 
-import Control.Lens((^.), re)
+import Control.Lens (re, (^.))
 import Control.Monad.Trans
 import Crypto.JOSE
 import Data.Aeson
+import qualified Data.ByteString.Lazy as LBS
 import Data.Proxy
-import Data.Text(Text)
-import Data.Text.Strict.Lens(utf8)
-import Network.Web.DB
-import Network.Web.Types
+import Data.Text (Text)
 import Data.Text.Encoding
-  (
-    encodeUtf8,
+  ( encodeUtf8,
   )
-import GHC.Generics
-import Network.Wai.Handler.Warp
+import Data.Text.Strict.Lens (utf8)
 import Network.CORS
-import Preface.Log
+import Network.Web.API
+import Network.Web.Config
+import Network.Web.DB
+import Network.Web.OpenApi
+import Network.Web.Types
 import Preface.Codec
+import Preface.Log
 import qualified Preface.Server as Server
 import Servant as S
 import Servant.Auth.Server as SAS
-import Network.Web.API
-import Network.Web.OpenApi
 import Servant.Client
-import qualified Data.ByteString.Lazy as LBS
 
 -- * Types
 
@@ -71,31 +72,6 @@ data AuthServer = AuthServer
 
 getServerPort :: AuthServer -> Int
 getServerPort (AuthServer app _) = Server.serverPort app
-
--- | Server configuration
-data AuthConfig = AuthConfig
-  { -- | the actual port server is listening on
-    authServerPort :: !Port,
-    -- | The server fully qualified domain name
-    authServerName :: !Text,
-    -- | Optional file to use for authenticating users with Basic auth
-    --  scheme. File should contain one login:password per line, with
-    --  password being encrypted using publicAuthKey
-    passwordsFile :: !FilePath,
-    -- | The key used to validate and sign authentication tokens
-    publicAuthKey :: !JWK
-  }
-  deriving (Eq, Show, Generic)
-
-instance ToJSON AuthConfig
-
-instance FromJSON AuthConfig
-
-defaultConfig :: JWK -> AuthConfig
-defaultConfig = AuthConfig defaultPort "localhost:3001" ".passwords"
-
-defaultPort :: Int
-defaultPort = 3001
 
 -- ** Basic Client, for testing purpose
 
@@ -135,22 +111,22 @@ loginS authDB cs js (Credentials l p) = do
         Just applyCookies -> return $ applyCookies NoContent
     _ -> throwError err401
 
-registerS
-        :: AuthDB -> JWTSettings -> UserRegistration -> Handler NoContent
-registerS authDB jwts UserRegistration{..} = do
+registerS ::
+  AuthDB -> JWTSettings -> UserRegistration -> Handler NoContent
+registerS authDB jwts UserRegistration {..} = do
   usr <- liftIO $ SAS.verifyJWT jwts (unToken regToken)
   case usr of
     Nothing -> throwError err403
-    Just RegToken{} -> do
+    Just RegToken {} -> do
       res <- runDB authDB (registerUser regLogin regPassword)
       case res of
         Left _ -> throwError err400
         Right _ -> pure NoContent
 
-tokensS
-        :: JWTSettings -> AuthResult AuthenticationToken -> Handler SerializedToken
-tokensS jwts (Authenticated AuthToken{auID}) = do
-  tid <- liftIO  $ genRandomBaseHex 16
+tokensS ::
+  JWTSettings -> AuthResult AuthenticationToken -> Handler SerializedToken
+tokensS jwts (Authenticated AuthToken {auID}) = do
+  tid <- liftIO $ genRandomBaseHex 16
   let regToken = RegToken auID (TokenID $ Bytes tid)
   res <- liftIO $ makeJWT regToken jwts Nothing
   case res of
@@ -162,7 +138,9 @@ tokensS _ _ = throwError err403
 -- TODO: validate claims
 server ::
   AuthResult val ->
-  Maybe Text -> path -> Handler (Headers '[Header "www-authenticate" String] NoContent)
+  Maybe Text ->
+  path ->
+  Handler (Headers '[Header "www-authenticate" String] NoContent)
 server _ (Just "OPTIONS") _ = pure $ noHeader NoContent
 server (Authenticated _) _ _ = handleValidate
   where
@@ -170,10 +148,10 @@ server (Authenticated _) _ _ = handleValidate
     handleValidate = pure $ noHeader NoContent
 server _ _ _ = throwAll err401 {errHeaders = [("www-authenticate", "Basic realm=\"test\"")]}
 
-data Startup = Startup { startName :: Text, startPort :: Int, startKey :: JWK}
+data Startup = Startup {startName :: Text, startPort :: Int, startKey :: JWK}
 
 instance ToJSON Startup where
-  toJSON Startup{..} = object [ "start_name" .= startName, "start_port" .= startPort, "start_key" .= (startKey ^. (thumbprint @SHA256) . re (base64url . digest) . utf8) ]
+  toJSON Startup {..} = object ["start_name" .= startName, "start_port" .= startPort, "start_key" .= (startKey ^. (thumbprint @SHA256) . re (base64url . digest) . utf8)]
 
 -- | Starts server with given configuration
 startServer :: AuthConfig -> IO AuthServer
@@ -182,7 +160,6 @@ startServer conf@AuthConfig {authServerPort, authServerName, publicAuthKey, pass
   appServer <- Server.startAppServer authServerName NoCORS authServerPort (mkApp publicAuthKey authDB)
   logInfo (Server.serverLogger appServer) $ Startup (Server.serverName appServer) (Server.serverPort appServer) publicAuthKey
   pure $ AuthServer appServer conf
-
 
 -- | Stops given server if it is runninng
 stopServer :: AuthServer -> IO ()
