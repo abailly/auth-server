@@ -1,19 +1,22 @@
 {-# LANGUAGE DeriveGeneric #-}
+
 module Network.Web.Config where
 
+import Crypto.JOSE (JWK)
 import Data.Aeson
-import Data.Text(Text, pack)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
+import Data.Functor
+import Data.Maybe (fromMaybe)
+import Data.Text (Text, pack)
 import qualified Data.Text.Lazy as Text
 import Data.Text.Lazy.Encoding (encodeUtf8)
-import System.Environment (lookupEnv)
-import Network.Web.Types
-import Data.Functor
-import Network.Wai.Handler.Warp (Port)
-import Crypto.JOSE (JWK)
 import GHC.Generics (Generic)
+import Network.Wai.Handler.Warp (Port)
 import Network.Web.DB (makeDB)
+import Network.Web.Types
+import System.Environment (lookupEnv)
+import Text.Read (readMaybe)
 
 -- | Server configuration
 data AuthConfig = AuthConfig
@@ -43,12 +46,13 @@ defaultPort = 3001
 makeConfig :: FilePath -> IO AuthConfig
 makeConfig jwkFile = do
   key <- lookupEnv "AUTH_SERVER_JWK" >>= getKey
-  port <- lookupEnv "AUTH_SERVER_PORT" <&> maybe defaultPort read
+  port <- lookupEnv "AUTH_SERVER_PORT" <&> maybe defaultPort readPort
   adminPassword <- lookupEnv "AUTH_SERVER_ADMIN_PASSWORD"
   passwords <- lookupEnv "AUTH_SERVER_PASSWORDS" >>= defaultPasswordFile adminPassword
-  serverName <-  lookupEnv "AUTH_SERVER_NAME" <&> maybe "localhost" pack
+  serverName <- lookupEnv "AUTH_SERVER_NAME" <&> maybe "localhost" pack
   pure $ AuthConfig port serverName passwords key
   where
+    readPort = fromMaybe (error "incorrect port value in environment variable AUTH_SERVER_PORT") . readMaybe
 
     defaultPasswordFile Nothing Nothing = error "neither environment variable 'AUTH_SERVER_PASSWORDS' nor 'AUTH_SERVER_ADMIN_PASSWORD' are set, define one of them"
     defaultPasswordFile (Just pwd) Nothing = do
