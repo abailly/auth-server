@@ -130,6 +130,7 @@ tests:
     - http-conduit
     - http-types
     - jose
+    - lens
     - mtl
     - network
     - process

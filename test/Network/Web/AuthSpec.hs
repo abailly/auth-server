@@ -7,7 +7,8 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.STM (newTVarIO, readTVarIO)
 import Control.Exception (IOException, bracket, catch)
 import Crypto.JOSE
-import Data.Aeson (encode)
+import Data.Aeson (encode, decode)
+import Control.Lens((^.))
 import qualified Data.ByteString.Lazy as LBS
 import Data.Text (Text)
 import Network.HTTP.Client
@@ -219,6 +220,13 @@ spec = parallel $
 
         responseStatus response `shouldBe` ok200
 
+      it "provides public key in JWK format without authentication" $  \(getServerPort -> authServerPort, _, mgr) -> do
+        request <- parseRequest ("http://localhost:" <> show authServerPort <> "/keys")
+
+        response <- httpLbs request mgr
+
+        responseStatus response `shouldBe` ok200
+        decode (responseBody response) `shouldBe` Just [sampleKey ^. asPublicKey]
 
 authTokenFor :: AuthenticationToken -> JWK -> IO LBS.ByteString
 authTokenFor claims key = either (error . show) id <$> makeJWT claims (defaultJWTSettings key) Nothing

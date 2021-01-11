@@ -3,14 +3,24 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Network.Web.Types where
+module Network.Web.Types
+  ( AuthenticationToken (..),
+    RegistrationToken (..),
+    Credentials (..),
+    UserRegistration (..),
+    SerializedToken (..),
+    Login, TokenID(..), Bytes(..),
+    makeNewKey,
+    module Crypto.JOSE.JWK,
+  )
+where
 
+import Crypto.JOSE.JWK
 import Data.Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import Data.Proxy
-import Crypto.JOSE.JWK
 import Data.String (IsString (..))
 import Data.Text (Text)
 import Data.Text.Encoding (decodeUtf8, encodeUtf8)
@@ -145,14 +155,14 @@ instance FromJSON UserRegistration where
 makeNewKey :: IO JWK
 makeNewKey = genJWK (RSAGenParam (4096 `div` 8))
 
-newtype SerializedToken = SerializedToken { unToken :: ByteString }
+newtype SerializedToken = SerializedToken {unToken :: ByteString}
   deriving (Eq, Show)
 
 instance ToJSON SerializedToken where
   toJSON (SerializedToken bs) = String $ decodeUtf8 bs
 
 instance FromJSON SerializedToken where
-  parseJSON = withText "SerializedToken" $ \ txt -> pure $ SerializedToken $ encodeUtf8 txt
+  parseJSON = withText "SerializedToken" $ \txt -> pure $ SerializedToken $ encodeUtf8 txt
 
 instance MimeRender OctetStream SerializedToken where
   mimeRender _ (SerializedToken bs) = LBS.fromStrict bs

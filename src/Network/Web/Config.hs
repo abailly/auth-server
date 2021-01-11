@@ -2,7 +2,6 @@
 
 module Network.Web.Config where
 
-import Crypto.JOSE (JWK)
 import Data.Aeson
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS

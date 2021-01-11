@@ -40,6 +40,7 @@ import Control.Lens (re, (^.))
 import Control.Monad.Trans
 import Crypto.JOSE
 import Data.Aeson
+import Data.Maybe
 import qualified Data.ByteString.Lazy as LBS
 import Data.Proxy
 import Data.Text (Text)
@@ -111,6 +112,13 @@ loginS authDB cs js (Credentials l p) = do
         Just applyCookies -> return $ applyCookies NoContent
     _ -> throwError err401
 
+keysS ::
+  JWTSettings ->
+  Handler [JWK]
+keysS js = do
+  let JWKSet keys = validationKeys js
+  pure $ mapMaybe (^. asPublicKey) keys
+
 registerS ::
   AuthDB -> JWTSettings -> UserRegistration -> Handler NoContent
 registerS authDB jwts UserRegistration {..} = do
@@ -179,4 +187,4 @@ mkApp key authDB _ = do
       cookieCfg = defaultCookieSettings
       cfg = jwtCfg :. cookieCfg :. authCfg :. EmptyContext
       api = Proxy :: Proxy (SwaggerAPI :<|> AuthAPIServer)
-  pure $ serveWithContext api cfg (pure authSwagger :<|> loginS authDB cookieCfg jwtCfg :<|> registerS authDB jwtCfg :<|> tokensS jwtCfg :<|> server)
+  pure $ serveWithContext api cfg (pure authSwagger :<|> loginS authDB cookieCfg jwtCfg :<|> registerS authDB jwtCfg :<|> keysS jwtCfg :<|> tokensS jwtCfg :<|> server)

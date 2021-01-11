@@ -42,6 +42,17 @@ type RegisterAPI =
     :> ReqBody '[JSON] UserRegistration
     :> Post '[JSON] NoContent
 
+type KeysAPI =
+  Summary "Provide this server's public key(s), for external validation of tokens"
+    :> Description
+         "Services relying on this authentication server can use those keys to validate provided tokens, \
+         \ both authentication tokens and registration tokens. Of course, this assumes the service can trust \
+         \ the key(s) indeed come from this authentication server hence should always be done in a trusted \
+         \ settings, either using HTTPS with certificate authentication or as part of a controlled deployment \
+         \ stack."
+    :> "keys"
+    :> Get '[JSON] [JWK]
+
 type TokensAPI =
   Summary
     "Registration tokens creation endpoint."
@@ -76,5 +87,6 @@ type Protected = Auth '[SA.JWT, SA.Cookie, SA.BasicAuth] AuthenticationToken
 type AuthAPIServer =
   LoginAPI
     :<|> RegisterAPI
+    :<|> KeysAPI
     :<|> Protected :> TokensAPI
     :<|> Protected :> Header "x-original-method" Text :> AuthAPI

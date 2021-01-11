@@ -16,6 +16,15 @@ instance ToSchema Credentials
 
 instance ToSchema UserRegistration
 
+instance ToSchema JWK where
+  declareNamedSchema _ =
+    return $
+      NamedSchema (Just "JWK") $
+        mempty
+          & description
+            ?~ "A JWK key as a JSON object."
+          & type_ ?~ SwaggerObject
+
 instance ToSchema SerializedToken where
   declareNamedSchema _ =
     return $
